@@ -1,0 +1,19 @@
+[package]
+name = "rproxy"
+version = "0.1.0"
+edition = "2021"
+authors = ["evin"]
+description = "rproxy: a chainable proxy"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.75"
+bytes = "1.5.0"
+clap = { version = "4.4.11", features = ["derive", "wrap_help"] }
+socket2 = "0.5.5"
+socks5-impl = "0.5.8"
+tokio = { version = "1.34.0", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["chrono", "env-filter"] }
+url = "2.5.0"
