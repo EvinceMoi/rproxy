@@ -4,9 +4,7 @@ mod config;
 mod server;
 mod logging;
 mod session;
-mod socks;
 mod utils;
-mod client;
 
 
 use config::config;

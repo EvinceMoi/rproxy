@@ -1,6 +1,27 @@
 use clap::Parser;
 use url::Url;
 
+mod detail {
+	use anyhow::{Result, bail, ensure};
+	use url::{Url, ParseError};
+
+	pub fn parse_proxy_pass(arg: &str) -> Result<Url> {
+		let supported_scheme = vec!["socks5", "https", "http"];
+		match Url::parse(arg) {
+			Ok(url) => {
+				let scheme_ok = supported_scheme.iter().any(|s| s.eq(&url.scheme()));
+				ensure!(scheme_ok, "unsupported scheme");
+				ensure!(url.host().is_some(), "host error");
+				ensure!(url.port_or_known_default().is_some(), "port error");
+				Ok(url)
+			},
+			Err(e) => {
+				bail!(e.to_string());
+			},
+		}
+	}
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 #[command(next_line_help = false)]
@@ -23,7 +44,7 @@ pub struct Args {
 	pub auth_users: Vec<String>,
 
 	/// Specify next proxy pass(e.g: socks5://user:passwd@ip:port)
-	#[arg(long, value_name = "next", value_parser = Url::parse)]
+	#[arg(long, value_name = "next", value_parser = detail::parse_proxy_pass)]
 	pub proxy_pass: Option<Url>,
 
 	/// Enable SSL for the next proxy pass
@@ -100,10 +121,20 @@ pub struct Args {
 }
 
 use std::sync::OnceLock;
-static APP_CONFIG: OnceLock<Args> = OnceLock::new();
 
+static APP_CONFIG: OnceLock<Args> = OnceLock::new();
 pub fn config() -> &'static Args {
     APP_CONFIG.get_or_init(|| {
 		Args::parse()
     })
+}
+
+static PROXY_SN: OnceLock<&'static str> = OnceLock::new();
+/// workaround for tls connect 'static lifetime api requirement
+pub fn proxy_sn() -> &'static str {
+	PROXY_SN.get_or_init(|| {
+		config().proxy_pass.as_ref().map_or("localhost", |ref p| {
+			p.host_str().map(|s| Box::leak(s.to_owned().into_boxed_str())).unwrap()
+		})
+	})
 }
