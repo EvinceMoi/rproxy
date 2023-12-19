@@ -3,6 +3,7 @@
 mod config;
 mod server;
 mod logging;
+mod proxy;
 mod session;
 mod utils;
 

@@ -31,12 +31,10 @@ impl Server {
             }
 
             tokio::spawn(async move {
-                // let mut sess = Session::new(socket);
-                // let _ = sess.start().await;
-                match start_session(&mut socket).await {
+                match start_session(socket).await {
                     Ok(_) => {},
                     Err(_) => {
-						let _ = socket.shutdown().await;
+						// let _ = socket.shutdown().await;
 					},
                 }
             });
