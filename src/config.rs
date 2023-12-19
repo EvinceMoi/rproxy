@@ -128,13 +128,3 @@ pub fn config() -> &'static Args {
 		Args::parse()
     })
 }
-
-static PROXY_SN: OnceLock<&'static str> = OnceLock::new();
-/// workaround for tls connect 'static lifetime api requirement
-pub fn proxy_sn() -> &'static str {
-	PROXY_SN.get_or_init(|| {
-		config().proxy_pass.as_ref().map_or("localhost", |ref p| {
-			p.host_str().map(|s| Box::leak(s.to_owned().into_boxed_str())).unwrap()
-		})
-	})
-}

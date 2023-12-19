@@ -22,7 +22,3 @@ pub fn ssl_config() -> Result<ClientConfig> {
 
 	Ok(config)
 }
-
-// pub fn sni_name(domain: &str) -> Result<ServerName<'_>> {
-// 	pki_types::ServerName::try_from(domain)
-// }

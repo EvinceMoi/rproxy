@@ -749,6 +749,7 @@ dependencies = [
  "hyper-util",
  "rustls",
  "rustls-pemfile",
+ "rustls-pki-types",
  "socket2",
  "socks5-impl",
  "thiserror",

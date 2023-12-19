@@ -19,6 +19,7 @@ hyper = { version = "1.0.1", features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1.1", features = ["http1", "tokio", "client", "server"] }
 rustls = "0.22.1"
 rustls-pemfile = "2.0.0"
+rustls-pki-types = "1.0.1"
 socket2 = "0.5.5"
 socks5-impl = "0.5.8"
 thiserror = "1.0.51"

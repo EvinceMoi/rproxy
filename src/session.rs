@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{config::{config, proxy_sn}, utils::ssl_config};
+use crate::{config::config, utils::ssl_config};
 use anyhow::{bail, ensure, Result};
 use base64::Engine;
 use bytes::Bytes;
@@ -364,7 +364,7 @@ async fn connect_http(url: &Url, target: &Address) -> Result<ProxyStream, http::
         let stream = TcpStream::connect((host.clone(), port))
             .await
             .map_err(|_| http::StatusCode::SERVICE_UNAVAILABLE)?;
-        let domain = pki_types::ServerName::try_from(proxy_sn())
+        let domain = pki_types::ServerName::try_from(host)
             .map_err(|_| http::StatusCode::INTERNAL_SERVER_ERROR)?;
         let connector = TlsConnector::from(Arc::new(ssl_config));
         let s = connector
