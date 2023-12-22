@@ -1,12 +1,14 @@
 use std::{io::ErrorKind, net::SocketAddr, pin::Pin, sync::Arc};
+use std::mem::MaybeUninit;
 
 use crate::{
     config::config,
-    utils::{base64_decode, base64_encode, ssl_config},
+    utils::{base64_decode, base64_encode, ssl_config_client, ssl_config_server}
 };
 use anyhow::{anyhow, bail, ensure, Result};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use socket2::SockRef;
 use hyper::{
     client::conn::http1 as client_http1, server::conn::http1 as server_http1, service::service_fn,
     upgrade::Upgraded,
@@ -21,9 +23,80 @@ use tokio::{
     io::{self, AsyncRead, AsyncWrite, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
 };
-use tokio_rustls::{TlsConnector, TlsStream};
+use tokio_rustls::{TlsConnector, TlsStream, TlsAcceptor};
 use tracing::{debug, warn};
 use url::Url;
+
+pub enum ProxyType {
+    SOCKS5,
+    SOCKS4,
+    TLS,
+    PlainHTTP,
+    Unknown,
+}
+
+pub async fn proto_detect(sock: &TcpStream) -> Result<ProxyType>
+{
+    sock.readable().await?;
+    // peek
+    let fb = {
+        let sock = SockRef::from(&sock);
+        let mut buf: [MaybeUninit<u8>; 5] = unsafe { MaybeUninit::uninit().assume_init() };
+        let size = sock.peek(&mut buf)?;
+        if size.eq(&0) {
+            bail!("peek message: no data");
+        }
+
+        unsafe { buf[0].assume_init() }
+    };
+
+    match fb {
+        0x05 => {
+            // socks5
+            Ok(ProxyType::SOCKS5)
+        }
+        0x04 => {
+            // socks4
+            Ok(ProxyType::SOCKS4)
+        }
+        0x16 => {
+            // http/socks proxy with tls
+            Ok(ProxyType::TLS)
+        }
+        0x47 | 0x50 | 0x43 => {
+            // plain http protocol
+            Ok(ProxyType::PlainHTTP)
+        }
+        _ => Ok(ProxyType::Unknown),
+    }
+}
+
+pub async fn start_proxy(sock: TcpStream) -> Result<()> {
+    let st = proto_detect(&sock).await?;
+    match st {
+        ProxyType::SOCKS5 => socks_proxy(sock).await?,
+        ProxyType::SOCKS4 => bail!("socks4 not supported"),
+        ProxyType::TLS => tls_proxy(sock).await?,
+        ProxyType::PlainHTTP => {
+            if config().disable_http || config().disable_insecure {
+                bail!("plain http protocol disabled")
+            }
+            http_proxy(sock).await?;
+        }
+        ProxyType::Unknown => bail!("unsupported protocol"),
+    }
+
+    Ok(())
+}
+async fn handle_type(pt: ProxyType) -> Result<()> {
+    match pt {
+        ProxyType::SOCKS5 => todo!(),
+        ProxyType::SOCKS4 => todo!(),
+        ProxyType::TLS => todo!(),
+        ProxyType::PlainHTTP => todo!(),
+        ProxyType::Unknown => todo!(),
+    }
+}
 
 #[derive(Debug)]
 pub enum ProxyError {
@@ -282,6 +355,15 @@ async fn proxy(
     }
 }
 
+pub async fn tls_proxy(mut sock: TcpStream) -> Result<()> {
+	let config = ssl_config_server()?;
+	let accpetor = TlsAcceptor::from(Arc::new(config));
+
+    let mut stream = accpetor.accept(sock).await?;
+    let pt = proto_detect(stream.get_ref().0).await?;
+	todo!()
+}
+
 async fn connect_target(target: &Address) -> Result<ProxyStream, io::Error> {
     let bind_local: Option<SocketAddr> =
         config().local_ip.as_ref().map(|l| l.parse().ok()).flatten();
@@ -389,7 +471,7 @@ async fn connect_http(url: &Url, target: &Address) -> Result<ProxyStream, http::
     let host = url.host().unwrap().to_string();
     let port = url.port_or_known_default().unwrap();
     let proxy = if url.scheme().eq("https") {
-        let ssl_config = ssl_config().map_err(|_| http::StatusCode::INTERNAL_SERVER_ERROR)?;
+        let ssl_config = ssl_config_client().map_err(|_| http::StatusCode::INTERNAL_SERVER_ERROR)?;
         let stream = TcpStream::connect((host.clone(), port))
             .await
             .map_err(|_| http::StatusCode::SERVICE_UNAVAILABLE)?;

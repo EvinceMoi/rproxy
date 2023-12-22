@@ -3,7 +3,7 @@ use socket2::{SockRef, TcpKeepalive};
 use tokio::{net::{TcpListener, TcpStream}, io::AsyncWriteExt};
 use tracing::{debug, info};
 
-use crate::{config::config, session::start_session};
+use crate::{config::config, proxy::start_proxy};
 
 pub struct Server {
     // args: Args,
@@ -20,7 +20,7 @@ impl Server {
         debug!("prepare to listen on: {}", &config().server_listen);
         let listener = TcpListener::bind(&config().server_listen).await?;
         loop {
-            let (mut socket, addr) = listener.accept().await?;
+            let (socket, addr) = listener.accept().await?;
             info!("new incoming connection: {:?}", addr);
             socket.set_nodelay(!config().scramble)?;
             {
@@ -31,7 +31,7 @@ impl Server {
             }
 
             tokio::spawn(async move {
-                match start_session(socket).await {
+                match start_proxy(socket).await {
                     Ok(_) => {},
                     Err(_) => {
 						// let _ = socket.shutdown().await;
