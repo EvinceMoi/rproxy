@@ -118,11 +118,12 @@ impl BaseStream {
             BaseStream::Http(up) => io::Result::Ok(up.1.clone()),
         }
     }
+    #[allow(dead_code)]
     pub fn lowest_layer(&self) -> &TcpStream {
         match self {
             BaseStream::Tcp(tcp) => tcp.get_ref(),
             BaseStream::Tls(tls) => tls.get_ref().get_ref().0,
-            BaseStream::Http(up) => todo!()
+            BaseStream::Http(_up) => todo!()
         }
     }
 }
@@ -340,10 +341,10 @@ async fn http_proxy_server_callback(
                         Ok(mut to) => {
                             let _ = io::copy_bidirectional(&mut from, &mut to).await;
                         }
-                        Err(err) => {}
+                        Err(_err) => {}
                     }
                 }
-                Err(e) => {}
+                Err(_e) => {}
             }
         });
         Ok(hyper::Response::new(

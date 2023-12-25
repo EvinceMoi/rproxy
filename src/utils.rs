@@ -26,7 +26,6 @@ pub fn ssl_config_client() -> Result<ClientConfig> {
 }
 
 pub fn ssl_config_server() -> Result<ServerConfig> {
-    // let mut root_cert_store = rustls::RootCertStore::empty();
     let certs = config()
         .ssl_certificate
         .as_ref()
