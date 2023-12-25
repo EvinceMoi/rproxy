@@ -1,15 +1,18 @@
 use anyhow::Result;
 
 pub fn setup_tracing() -> Result<()> {
-    use tracing_subscriber::{fmt, fmt::time::ChronoLocal, filter::{EnvFilter, LevelFilter}};
+    use tracing_subscriber::{
+        filter::{EnvFilter, LevelFilter},
+        fmt,
+        fmt::time::ChronoLocal,
+    };
 
     let timer = {
         let format = "[%Y-%m-%d %H:%M:%S%.3f %:z]".to_string();
         ChronoLocal::new(format)
     };
 
-    let filter = EnvFilter::from_default_env()
-        .add_directive(LevelFilter::INFO.into());
+    let filter = EnvFilter::from_default_env().add_directive(LevelFilter::INFO.into());
 
     let subscriber = fmt()
         .compact()

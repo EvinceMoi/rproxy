@@ -1,17 +1,15 @@
 #![feature(io_error_more)]
 
 mod config;
-mod server;
 mod logging;
 mod proxy;
+mod server;
 mod utils;
 
-
-use config::config;
 use anyhow::Result;
+use config::config;
 use server::Server;
-use tracing::{info, debug};
-
+use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {

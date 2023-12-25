@@ -1,7 +1,7 @@
 use anyhow::Result;
 use socket2::{SockRef, TcpKeepalive};
 use tokio::net::TcpListener;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::{config::config, proxy::start_proxy};
 
@@ -34,11 +34,11 @@ impl Server {
                 match start_proxy(socket).await {
                     Ok(_) => {
                         info!("|{:?}| connection end", addr);
-                    },
+                    }
                     Err(err) => {
-						// let _ = socket.shutdown().await;
+                        // let _ = socket.shutdown().await;
                         error!("proxy error: {:?}", err);
-					},
+                    }
                 }
             });
         }

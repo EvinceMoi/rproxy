@@ -1,9 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::{fs::File, io::BufReader};
 
-use rustls::{
-    ClientConfig, ServerConfig,
-};
+use rustls::{ClientConfig, ServerConfig};
 
 use crate::config::config;
 
@@ -57,7 +55,7 @@ pub fn ssl_config_server() -> Result<ServerConfig> {
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)?;
 
-	Ok(config)
+    Ok(config)
 }
 
 pub fn base64_encode(dat: &str) -> String {
