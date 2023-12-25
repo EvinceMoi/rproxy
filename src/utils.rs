@@ -1,9 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use std::{fs::File, io::BufReader};
-use tracing_subscriber::Layer;
 
 use rustls::{
-    pki_types::{self, ServerName},
     ClientConfig, ServerConfig,
 };
 

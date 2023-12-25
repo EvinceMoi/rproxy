@@ -1,7 +1,7 @@
 use anyhow::Result;
 use socket2::{SockRef, TcpKeepalive};
-use tokio::{net::{TcpListener, TcpStream}, io::AsyncWriteExt};
-use tracing::{debug, info};
+use tokio::net::TcpListener;
+use tracing::{info, error};
 
 use crate::{config::config, proxy::start_proxy};
 
@@ -17,11 +17,11 @@ impl Server {
     }
 
     pub async fn run(&self) -> Result<()> {
-        debug!("prepare to listen on: {}", &config().server_listen);
         let listener = TcpListener::bind(&config().server_listen).await?;
+        info!("server listen on: {}", &config().server_listen);
         loop {
             let (socket, addr) = listener.accept().await?;
-            info!("new incoming connection: {:?}", addr);
+            info!("|{:?}| new incoming connection", addr);
             socket.set_nodelay(!config().scramble)?;
             {
                 let socket_ref = SockRef::from(&socket);
@@ -32,9 +32,12 @@ impl Server {
 
             tokio::spawn(async move {
                 match start_proxy(socket).await {
-                    Ok(_) => {},
-                    Err(_) => {
+                    Ok(_) => {
+                        info!("|{:?}| connection end", addr);
+                    },
+                    Err(err) => {
 						// let _ = socket.shutdown().await;
+                        error!("proxy error: {:?}", err);
 					},
                 }
             });

@@ -1,5 +1,4 @@
 use std::{io::ErrorKind, net::SocketAddr, pin::Pin, sync::Arc};
-use std::mem::MaybeUninit;
 
 use crate::{
     config::config,
@@ -19,7 +18,7 @@ use socks5_impl::protocol::{
     Request, Response,
 };
 use tokio::{
-    io::{self, AsyncRead, AsyncWrite, AsyncWriteExt},
+    io::{self, AsyncRead, AsyncWrite, AsyncBufReadExt, AsyncWriteExt, BufStream},
     net::{TcpSocket, TcpStream},
 };
 use tokio_rustls::{TlsConnector, TlsStream, TlsAcceptor};
@@ -35,57 +34,55 @@ pub enum ProxyType {
     Unknown,
 }
 
-pub async fn proto_detect(sock: &TcpStream) -> Result<ProxyType>
+fn parse_proxy_type(fb: u8) -> ProxyType {
+    match fb {
+        0x05 => {
+            // socks5
+            ProxyType::SOCKS5
+        }
+        0x04 => {
+            // socks4
+            ProxyType::SOCKS4
+        }
+        0x16 => {
+            // http/socks proxy with tls
+            ProxyType::TLS
+        }
+        0x47 | 0x50 | 0x43 => {
+            // plain http protocol
+            ProxyType::PlainHTTP
+        }
+        _ => ProxyType::Unknown,
+    }
+}
+
+pub async fn proto_detect(stream: &TcpStream) -> Result<ProxyType>
 {
-    sock.readable().await?;
-    // peek
     let fb = {
+        stream.readable().await?;
         let mut buf = vec![0u8; 1];
-        let size = sock.peek(&mut buf).await?;
+        let size = stream.peek(&mut buf).await?;
         if size.eq(&0) {
             bail!("peek failed: no data")
         }
         buf[0]
     };
-    debug!("peek first byte: {fb:#x}");
-
-    match fb {
-        0x05 => {
-            // socks5
-            Ok(ProxyType::SOCKS5)
-        }
-        0x04 => {
-            // socks4
-            Ok(ProxyType::SOCKS4)
-        }
-        0x16 => {
-            // http/socks proxy with tls
-            Ok(ProxyType::TLS)
-        }
-        0x47 | 0x50 | 0x43 => {
-            // plain http protocol
-            Ok(ProxyType::PlainHTTP)
-        }
-        _ => Ok(ProxyType::Unknown),
-    }
+    Ok(parse_proxy_type(fb))
 }
 
-pub async fn start_proxy(sock: TcpStream) -> Result<()> {
-    let pt = proto_detect(&sock).await?;
-    handle_type(pt, BaseStream::Tcp(sock)).await?;
+pub async fn start_proxy(mut sock: TcpStream) -> Result<()> {
+    let pt = proto_detect(&mut sock).await?;
+    handle_type(pt, sock).await?;
 
     Ok(())
 }
-async fn handle_type(pt: ProxyType, income: BaseStream) -> Result<()>
+async fn handle_type(pt: ProxyType, income: TcpStream) -> Result<()>
 {
     match pt {
         ProxyType::SOCKS5 => socks_proxy(income).await?,
         ProxyType::SOCKS4 => bail!("socks4 not supported"),
         ProxyType::TLS => {
-            match income {
-                BaseStream::Tcp(tcp) => tls_proxy(tcp).await?,
-                _ => bail!("unknown protocol"),
-            }
+            tls_proxy(income).await?;
         }
         ProxyType::PlainHTTP => {
             if config().disable_http || config().disable_insecure {
@@ -101,7 +98,6 @@ async fn handle_type(pt: ProxyType, income: BaseStream) -> Result<()>
 
 #[derive(Debug)]
 pub enum ProxyError {
-    Io(io::Error),
     Socks(Reply),
     Http(http::StatusCode),
     UnknownScheme,
@@ -109,23 +105,23 @@ pub enum ProxyError {
 
 #[derive(Debug)]
 pub enum BaseStream {
-    Tcp(TcpStream),
-    Tls(TlsStream<TcpStream>),
+    Tcp(BufStream<TcpStream>),
+    Tls(BufStream<TlsStream<TcpStream>>),
     Http((TokioIo<Upgraded>, SocketAddr)),
 }
 
 impl BaseStream {
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         match self {
-            BaseStream::Tcp(tcp) => tcp.local_addr(),
-            BaseStream::Tls(tls) => tls.get_ref().0.local_addr(),
+            BaseStream::Tcp(tcp) => tcp.get_ref().local_addr(),
+            BaseStream::Tls(tls) => tls.get_ref().get_ref().0.local_addr(),
             BaseStream::Http(up) => io::Result::Ok(up.1.clone()),
         }
     }
     pub fn lowest_layer(&self) -> &TcpStream {
         match self {
-            BaseStream::Tcp(tcp) => tcp,
-            BaseStream::Tls(tls) => tls.get_ref().0,
+            BaseStream::Tcp(tcp) => tcp.get_ref(),
+            BaseStream::Tls(tls) => tls.get_ref().get_ref().0,
             BaseStream::Http(up) => todo!()
         }
     }
@@ -179,7 +175,10 @@ impl AsyncWrite for BaseStream {
     }
 }
 
-pub async fn socks_proxy<S: AsyncRead + AsyncWrite + Unpin + Send>(mut sock: S) -> Result<()> {
+pub async fn socks_proxy<S>(mut sock: S) -> Result<()> 
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send
+{
     let request = handshake::Request::retrieve_from_async_stream(&mut sock).await?;
     let server_method = {
         if !config().auth_users.is_empty() {
@@ -191,11 +190,13 @@ pub async fn socks_proxy<S: AsyncRead + AsyncWrite + Unpin + Send>(mut sock: S) 
     if !request.evaluate_method(server_method) {
         let response = handshake::Response::new(AuthMethod::NoAcceptableMethods);
         response.write_to_async_stream(&mut sock).await?;
+        sock.flush().await?;
         let _ = sock.shutdown().await;
         bail!("no acceptable methods form negotiation");
     } else {
         let response = handshake::Response::new(server_method);
         response.write_to_async_stream(&mut sock).await?;
+        sock.flush().await?;
     }
 
     if server_method == AuthMethod::UserPass {
@@ -210,6 +211,7 @@ pub async fn socks_proxy<S: AsyncRead + AsyncWrite + Unpin + Send>(mut sock: S) 
         };
         let res = handshake::password_method::Response::new(status);
         res.write_to_async_stream(&mut sock).await?;
+        sock.flush().await?;
         ensure!(matched, "auth failed");
     }
 
@@ -223,6 +225,7 @@ pub async fn socks_proxy<S: AsyncRead + AsyncWrite + Unpin + Send>(mut sock: S) 
                     debug!("up stream addr: {:?}", addr);
                     let resp = Response::new(Reply::Succeeded, Address::SocketAddress(addr));
                     resp.write_to_async_stream(&mut sock).await?;
+                    sock.flush().await?;
                     // forward
                     io::copy_bidirectional(&mut sock, &mut up).await?;
                 }
@@ -234,6 +237,7 @@ pub async fn socks_proxy<S: AsyncRead + AsyncWrite + Unpin + Send>(mut sock: S) 
                     };
                     let resp = Response::new(reply, Address::unspecified());
                     resp.write_to_async_stream(&mut sock).await?;
+                    sock.flush().await?;
                     sock.shutdown().await?;
                 }
             }
@@ -364,7 +368,23 @@ pub async fn tls_proxy(sock: TcpStream) -> Result<()>
 	let accpetor = TlsAcceptor::from(Arc::new(config));
 
     let stream = accpetor.accept(sock).await?;
-    todo!();
+    let mut bs = BufStream::new(stream);
+    let fb = {
+        let buf = bs.fill_buf().await?;
+        ensure!(buf.len() > 0, "tls_proxy eof");
+        buf[0]
+    };
+        
+    match parse_proxy_type(fb) {
+        ProxyType::SOCKS5 => socks_proxy(bs).await?,
+        ProxyType::PlainHTTP => {
+            http_proxy(bs).await?
+        },
+        _ => {
+            bail!("unknown protocol after tls handshake");
+        }
+    }
+
     Ok(())
 }
 
@@ -390,13 +410,14 @@ async fn connect_target(target: &Address) -> Result<BaseStream, io::Error> {
     match target {
         Address::SocketAddress(sa) => {
             if let Some(sock) = binded_sock {
-                sock.connect(sa.clone()).await.map(BaseStream::Tcp)
+                sock.connect(sa.clone()).await.map(BufStream::new).map(BaseStream::Tcp)
             } else {
-                TcpStream::connect(sa).await.map(BaseStream::Tcp)
+                TcpStream::connect(sa).await.map(BufStream::new).map(BaseStream::Tcp)
             }
         }
         Address::DomainAddress(name, port) => TcpStream::connect((name.clone(), port.clone()))
             .await
+            .map(BufStream::new)
             .map(BaseStream::Tcp),
     }
 }
@@ -468,7 +489,7 @@ async fn connect_socks5(url: &Url, target: &Address) -> Result<BaseStream, Reply
             return Err(res.reply);
         }
     }
-    Ok(BaseStream::Tcp(proxy))
+    Ok(BaseStream::Tcp(BufStream::new(proxy)))
 }
 
 async fn connect_http(url: &Url, target: &Address) -> Result<BaseStream, http::StatusCode> {
@@ -486,12 +507,12 @@ async fn connect_http(url: &Url, target: &Address) -> Result<BaseStream, http::S
             .connect(domain, stream)
             .await
             .map_err(|_| http::StatusCode::SERVICE_UNAVAILABLE)?;
-        BaseStream::Tls(TlsStream::Client(s))
+        BaseStream::Tls(BufStream::new(TlsStream::Client(s)))
     } else {
         let stream = TcpStream::connect((host.clone(), port))
             .await
             .map_err(|_| http::StatusCode::SERVICE_UNAVAILABLE)?;
-        BaseStream::Tcp(stream)
+        BaseStream::Tcp(BufStream::new(stream))
     };
     let local_addr = proxy.local_addr().unwrap();
     // send CONNECT method

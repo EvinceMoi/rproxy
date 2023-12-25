@@ -3,7 +3,7 @@ use url::Url;
 
 mod detail {
 	use anyhow::{Result, bail, ensure};
-	use url::{Url, ParseError};
+	use url::Url;
 
 	pub fn parse_proxy_pass(arg: &str) -> Result<Url> {
 		let supported_scheme = vec!["socks5", "https", "http"];
