@@ -22,7 +22,7 @@ use tokio::{
     net::{TcpSocket, TcpStream},
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
-use tracing::{debug, warn};
+use tracing::{debug, warn, info};
 use url::Url;
 
 #[derive(Debug)]
@@ -217,6 +217,7 @@ where
     let req = Request::retrieve_from_async_stream(&mut sock).await?;
     match req.command {
         socks5_impl::protocol::Command::Connect => {
+            info!(">>> target address: {:?}", req.address);
             let connect = do_connect(req.address).await;
             match connect {
                 Ok(mut up) => {
@@ -226,7 +227,13 @@ where
                     resp.write_to_async_stream(&mut sock).await?;
                     sock.flush().await?;
                     // forward
-                    io::copy_bidirectional(&mut sock, &mut up).await?;
+                    if let Err(err) = io::copy_bidirectional(&mut sock, &mut up).await {
+                        // ignore rustls error: peer closed connection without sending TLS close_notify: 
+                        // https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+                        if err.kind() != ErrorKind::UnexpectedEof {
+                            warn!("copy stream error: {}", err);
+                        }
+                    }
                 }
                 Err(rep) => {
                     debug!("socks_do_connect error: {:?}", rep);
@@ -327,6 +334,7 @@ async fn http_proxy_server_callback(
         }
         let host = req.uri().host().as_ref().unwrap().to_string();
         let port = req.uri().port_u16().unwrap();
+        info!(">>> target address: {}:{}", host, port);
         tokio::task::spawn(async move {
             match hyper::upgrade::on(req).await {
                 Ok(up) => {
@@ -334,7 +342,11 @@ async fn http_proxy_server_callback(
                     let to = do_connect(Address::DomainAddress(host.clone(), port)).await;
                     match to {
                         Ok(mut to) => {
-                            let _ = io::copy_bidirectional(&mut from, &mut to).await;
+                            if let Err(err) = io::copy_bidirectional(&mut from, &mut to).await {
+                                if err.kind() != ErrorKind::UnexpectedEof {
+                                    warn!("copy stream error: {}", err);
+                                }
+                            }
                         }
                         Err(_err) => {}
                     }
