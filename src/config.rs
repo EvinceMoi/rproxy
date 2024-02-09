@@ -39,9 +39,9 @@ pub struct Args {
 		long, 
 		value_name = "usrname:passwd",
 		value_delimiter = ',',
-		default_values = ["jack:1111"]
+		// default_values = ["jack:1111"]
 	)]
-    pub auth_users: Vec<String>,
+    pub auth_users: Option<Vec<String>>,
 
     /// Specify next proxy pass(e.g: socks5://user:passwd@ip:port)
     #[arg(long, value_name = "next", value_parser = detail::parse_proxy_pass)]

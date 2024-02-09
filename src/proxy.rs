@@ -180,11 +180,13 @@ where
 {
     let request = handshake::Request::retrieve_from_async_stream(&mut sock).await?;
     let server_method = {
-        if !config().auth_users.is_empty() {
-            AuthMethod::UserPass
-        } else {
-            AuthMethod::NoAuth
-        }
+        config().auth_users.as_ref().map_or(AuthMethod::NoAuth, |users| {
+            if users.is_empty() {
+                AuthMethod::NoAuth
+            } else {
+                AuthMethod::UserPass
+            }
+        })
     };
     if !request.evaluate_method(server_method) {
         let response = handshake::Response::new(AuthMethod::NoAcceptableMethods);
@@ -202,7 +204,7 @@ where
         let req =
             handshake::password_method::Request::retrieve_from_async_stream(&mut sock).await?;
         let auth = format!("{}:{}", req.user_key.username, req.user_key.password);
-        let matched = config().auth_users.iter().any(|au| au.eq(&auth));
+        let matched = config().auth_users.as_ref().unwrap().iter().any(|au| au.eq(&auth));
         let status = if matched {
             Status::Succeeded
         } else {
@@ -286,7 +288,7 @@ async fn http_proxy_server_callback(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     if req.method() == hyper::Method::CONNECT {
-        if !config().auth_users.is_empty() {
+        if config().auth_users.is_some() && !config().auth_users.as_ref().unwrap().is_empty() {
             let ok = req
                 .headers()
                 .get(hyper::header::PROXY_AUTHORIZATION)
@@ -316,7 +318,7 @@ async fn http_proxy_server_callback(
                             if s.is_empty() {
                                 false
                             } else {
-                                config().auth_users.iter().any(|au| au.eq(&s))
+                                config().auth_users.as_ref().unwrap().iter().any(|au| au.eq(&s))
                             }
                         })
                         .unwrap_or(false)
@@ -408,6 +410,7 @@ async fn connect_target(target: &Address) -> Result<BaseStream, io::Error> {
         .flatten()
         .map(|sock| {
             let _ = sock.set_reuseaddr(true);
+            #[cfg(target_family = "unix")]
             let _ = sock.set_reuseport(true);
             let _ = sock.bind(bind_local.unwrap());
             sock
