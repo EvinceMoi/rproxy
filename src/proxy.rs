@@ -253,7 +253,7 @@ where
         socks5_impl::protocol::Command::Bind => {
             bail!("socks request unsupported command");
         }
-        socks5_impl::protocol::Command::UdpAssociate => todo!("udp support"),
+        socks5_impl::protocol::Command::UdpAssociate => bail!("udp not supported by now"),
     }
 
     Ok(())

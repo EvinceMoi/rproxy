@@ -1,0 +1,15 @@
+[Unit]
+Description=RProxy Service Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/rproxy --server-listen [::]:54321 --auth-users jack:1111
+WorkingDirectory=/var/log/rproxy
+
+LimitNOFILE=100000
+Restart=always
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
